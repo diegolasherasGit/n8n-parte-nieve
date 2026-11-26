@@ -1,0 +1,296 @@
+{
+  "name": "Parte de nieve Formigal-Panticosa",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "triggerAtHour": 7,
+              "triggerAtMinute": 30
+            }
+          ]
+        }
+      },
+      "id": "a1",
+      "name": "Cada dia 07:30",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "httpMethod": "GET",
+        "path": "parte-nieve",
+        "responseMode": "lastNode",
+        "options": {}
+      },
+      "id": "a2",
+      "name": "Webhook JSON",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "url": "https://api.open-meteo.com/v1/forecast",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "latitude",
+              "value": "42.7656"
+            },
+            {
+              "name": "longitude",
+              "value": "-0.3694"
+            },
+            {
+              "name": "elevation",
+              "value": "1800"
+            },
+            {
+              "name": "daily",
+              "value": "temperature_2m_max,temperature_2m_min,snowfall_sum,wind_gusts_10m_max"
+            },
+            {
+              "name": "timezone",
+              "value": "Europe/Madrid"
+            },
+            {
+              "name": "forecast_days",
+              "value": "3"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "a3",
+      "name": "Open-Meteo API (JSON)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        260,
+        100
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Nodo \"Generar parte\" (Code, Run Once for All Items)\n// Siempre devuelve datos: en directo si la API responde; si falla, el ultimo dato real guardado.\nconst memoria = $getWorkflowStaticData('global');\nconst entrada = $input.first().json;\n// Control de calidad: la respuesta debe tener todas las series, mismo largo y valores plausibles.\nfunction validar(daily) {\n  if (!daily || !Array.isArray(daily.time) || daily.time.length === 0) return false;\n  const rangos = {\n    temperature_2m_max: [-50, 45], temperature_2m_min: [-50, 45],\n    snowfall_sum: [0, 300], wind_gusts_10m_max: [0, 300],\n  };\n  return Object.entries(rangos).every(([k, [min, max]]) =>\n    Array.isArray(daily[k]) && daily[k].length === daily.time.length &&\n    daily[k].every(v => typeof v === 'number' && v >= min && v <= max));\n}\nlet d = validar(entrada.daily) ? entrada.daily : null;\nlet origen = 'en directo';\nlet actualizado = new Date().toISOString();\nif (d) {\n  memoria.ultimo = { daily: d, actualizado };\n} else if (memoria.ultimo) {\n  d = memoria.ultimo.daily;\n  actualizado = memoria.ultimo.actualizado;\n  origen = entrada.daily ? 'ultimo dato conocido (la API devolvio datos no validos)' : 'ultimo dato conocido (la API no respondio)';\n} else {\n  throw new Error('Open-Meteo no responde y todavia no hay datos guardados');\n}\nconst dias = d.time.map((fecha, i) => {\n  const nieve = d.snowfall_sum[i];\n  const racha = d.wind_gusts_10m_max[i];\n  const alertas = [];\n  if (nieve >= 10) alertas.push('NEVADA FUERTE (>= 10 cm)');\n  if (racha >= 70) alertas.push('VIENTO FUERTE: posible cierre de remontes (rachas >= 70 km/h)');\n  if (d.temperature_2m_min[i] <= -10) alertas.push('FRIO INTENSO (<= -10 C)');\n  return {\n    fecha,\n    tmin: d.temperature_2m_min[i],\n    tmax: d.temperature_2m_max[i],\n    nieve_cm: nieve,\n    racha_kmh: racha,\n    alertas,\n  };\n});\nconst hayAlertas = dias.some(x => x.alertas.length > 0);\nconst resumen = dias.map(x =>\n  `${x.fecha}: ${x.tmin}/${x.tmax} C, nieve ${x.nieve_cm} cm, rachas ${x.racha_kmh} km/h` +\n  (x.alertas.length ? ` -> ${x.alertas.join('; ')}` : '')\n).join('\\n');\nreturn [{ json: { estacion: 'Formigal-Panticosa', origen, actualizado, hayAlertas, resumen, dias } }];\n"
+      },
+      "id": "a4",
+      "name": "Generar parte",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        520,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "httpMethod": "GET",
+        "path": "parte-nieve-web",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "b1",
+      "name": "Webhook pagina web",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        420
+      ]
+    },
+    {
+      "parameters": {
+        "url": "https://api.open-meteo.com/v1/forecast",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "latitude",
+              "value": "42.7656"
+            },
+            {
+              "name": "longitude",
+              "value": "-0.3694"
+            },
+            {
+              "name": "elevation",
+              "value": "1800"
+            },
+            {
+              "name": "daily",
+              "value": "temperature_2m_max,temperature_2m_min,snowfall_sum,wind_gusts_10m_max"
+            },
+            {
+              "name": "timezone",
+              "value": "Europe/Madrid"
+            },
+            {
+              "name": "forecast_days",
+              "value": "3"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "b2",
+      "name": "Open-Meteo API (web)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        260,
+        420
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Nodo \"Generar parte\" (Code, Run Once for All Items)\n// Siempre devuelve datos: en directo si la API responde; si falla, el ultimo dato real guardado.\nconst memoria = $getWorkflowStaticData('global');\nconst entrada = $input.first().json;\n// Control de calidad: la respuesta debe tener todas las series, mismo largo y valores plausibles.\nfunction validar(daily) {\n  if (!daily || !Array.isArray(daily.time) || daily.time.length === 0) return false;\n  const rangos = {\n    temperature_2m_max: [-50, 45], temperature_2m_min: [-50, 45],\n    snowfall_sum: [0, 300], wind_gusts_10m_max: [0, 300],\n  };\n  return Object.entries(rangos).every(([k, [min, max]]) =>\n    Array.isArray(daily[k]) && daily[k].length === daily.time.length &&\n    daily[k].every(v => typeof v === 'number' && v >= min && v <= max));\n}\nlet d = validar(entrada.daily) ? entrada.daily : null;\nlet origen = 'en directo';\nlet actualizado = new Date().toISOString();\nif (d) {\n  memoria.ultimo = { daily: d, actualizado };\n} else if (memoria.ultimo) {\n  d = memoria.ultimo.daily;\n  actualizado = memoria.ultimo.actualizado;\n  origen = entrada.daily ? 'ultimo dato conocido (la API devolvio datos no validos)' : 'ultimo dato conocido (la API no respondio)';\n} else {\n  throw new Error('Open-Meteo no responde y todavia no hay datos guardados');\n}\nconst dias = d.time.map((fecha, i) => {\n  const nieve = d.snowfall_sum[i];\n  const racha = d.wind_gusts_10m_max[i];\n  const alertas = [];\n  if (nieve >= 10) alertas.push('NEVADA FUERTE (>= 10 cm)');\n  if (racha >= 70) alertas.push('VIENTO FUERTE: posible cierre de remontes (rachas >= 70 km/h)');\n  if (d.temperature_2m_min[i] <= -10) alertas.push('FRIO INTENSO (<= -10 C)');\n  return {\n    fecha,\n    tmin: d.temperature_2m_min[i],\n    tmax: d.temperature_2m_max[i],\n    nieve_cm: nieve,\n    racha_kmh: racha,\n    alertas,\n  };\n});\nconst hayAlertas = dias.some(x => x.alertas.length > 0);\nconst resumen = dias.map(x =>\n  `${x.fecha}: ${x.tmin}/${x.tmax} C, nieve ${x.nieve_cm} cm, rachas ${x.racha_kmh} km/h` +\n  (x.alertas.length ? ` -> ${x.alertas.join('; ')}` : '')\n).join('\\n');\nreturn [{ json: { estacion: 'Formigal-Panticosa', origen, actualizado, hayAlertas, resumen, dias } }];\n"
+      },
+      "id": "b3",
+      "name": "Generar parte (web)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        520,
+        420
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Nodo \"Generar HTML\" (Code, Run Once for All Items)\nconst p = $input.first().json;\nconst esc = s => String(s).replace(/[&<>\"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '\"': '&quot;' }[c]));\nconst tarjetas = p.dias.map(x => `\n  <div class=\"card ${x.alertas.length ? 'alerta' : 'ok'}\">\n    <h2>${esc(x.fecha)}</h2>\n    <p class=\"temp\">${esc(x.tmin)}&deg; / ${esc(x.tmax)}&deg;C</p>\n    <p>Nieve: <b>${esc(x.nieve_cm)} cm</b></p>\n    <p>Rachas: <b>${esc(x.racha_kmh)} km/h</b></p>\n    ${x.alertas.length ? '<ul>' + x.alertas.map(a => '<li>' + esc(a) + '</li>').join('') + '</ul>' : '<p class=\"sin\">Sin alertas</p>'}\n  </div>`).join('');\nconst html = `<!doctype html><html lang=\"es\"><head><meta charset=\"utf-8\">\n<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">\n<title>Parte de nieve - ${esc(p.estacion)}</title>\n<style>\nbody{font-family:system-ui,sans-serif;background:#eef3f8;margin:0;padding:24px;color:#1b2a3a}\nh1{margin:0 0 4px} .sub{color:#5b6b7c;margin:0 0 20px}\n.estado{display:inline-block;padding:6px 14px;border-radius:20px;font-weight:600;margin-bottom:20px;color:#fff;background:${p.hayAlertas ? '#c0392b' : '#27ae60'}}\n.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:16px}\n.card{background:#fff;border-radius:12px;padding:16px;box-shadow:0 2px 8px rgba(0,0,0,.08);border-top:6px solid #27ae60}\n.card.alerta{border-top-color:#c0392b}\n.card h2{margin:0 0 8px;font-size:1rem;color:#5b6b7c}\n.temp{font-size:1.6rem;font-weight:700;margin:4px 0 10px}\n.card p{margin:4px 0} .card ul{margin:8px 0 0;padding-left:18px;color:#c0392b;font-weight:600}\n.sin{color:#27ae60}\n</style></head><body>\n<h1>Parte de nieve - ${esc(p.estacion)}</h1>\n<p class=\"sub\">Datos: Open-Meteo &middot; ${esc(p.origen)} &middot; actualizado ${esc(p.actualizado)}</p>\n<div class=\"estado\">${p.hayAlertas ? 'HAY ALERTAS' : 'SIN ALERTAS'}</div>\n<div class=\"grid\">${tarjetas}</div>\n</body></html>`;\nreturn [{ json: { html } }];\n"
+      },
+      "id": "b4",
+      "name": "Generar HTML",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        780,
+        420
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "text",
+        "responseBody": "={{ $json.html }}",
+        "options": {
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Content-Type",
+                "value": "text/html; charset=utf-8"
+              }
+            ]
+          }
+        }
+      },
+      "id": "b5",
+      "name": "Responder pagina",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        1040,
+        420
+      ]
+    }
+  ],
+  "connections": {
+    "Cada dia 07:30": {
+      "main": [
+        [
+          {
+            "node": "Open-Meteo API (JSON)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Webhook JSON": {
+      "main": [
+        [
+          {
+            "node": "Open-Meteo API (JSON)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Open-Meteo API (JSON)": {
+      "main": [
+        [
+          {
+            "node": "Generar parte",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Webhook pagina web": {
+      "main": [
+        [
+          {
+            "node": "Open-Meteo API (web)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Open-Meteo API (web)": {
+      "main": [
+        [
+          {
+            "node": "Generar parte (web)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generar parte (web)": {
+      "main": [
+        [
+          {
+            "node": "Generar HTML",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generar HTML": {
+      "main": [
+        [
+          {
+            "node": "Responder pagina",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  }
+}
